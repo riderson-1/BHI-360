@@ -4,7 +4,7 @@
 LOG_MODULE_DECLARE(main);
 
 // Define SPI instance
-const nrfx_spim_t m_spi = NRFX_SPIM_INSTANCE(3);  // Using SPIM3
+nrfx_spim_t m_spi = NRFX_SPIM_INSTANCE(3);  // Using SPIM3
 
 void setup_SPI(imu_device_t *imu)
 {
@@ -33,7 +33,7 @@ int8_t bhi360_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t length, voi
     size_t s_tx_buf = sizeof(m_tx_buf);
     size_t s_rx_buf = sizeof(m_rx_buf);
 
-    volatile uint32_t * p_spim_event_end = (uint32_t *) nrfx_spim_end_event_get(&m_spi);
+    volatile uint32_t * p_spim_event_end = (uint32_t *) nrfx_spim_end_event_address_get(&m_spi);
 
     memset(reg_data, 0xff, length);
     memset(m_tx_buf, 0xff, s_tx_buf);
@@ -46,7 +46,7 @@ int8_t bhi360_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t length, voi
     int err_code = nrfx_spim_xfer(&m_spi, &xfer_desc, NRFX_SPIM_FLAG_NO_XFER_EVT_HANDLER);
     APP_ERROR_CHECK(err_code);
 
-    if (err_code == NRFX_SUCCESS)
+    if (err_code == 0)
     {
         while (*p_spim_event_end == 0) {};
         *p_spim_event_end = 0; 
@@ -63,7 +63,7 @@ int8_t bhi360_spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t leng
     imu_device_t *imu = (imu_device_t *)intf_ptr;
     uint8_t m_tx_buf[length + 1];
 
-    volatile uint32_t * p_spim_event_end = (uint32_t *) nrfx_spim_end_event_get(&m_spi);
+    volatile uint32_t * p_spim_event_end = (uint32_t *) nrfx_spim_end_event_address_get(&m_spi);
 
     memset(m_tx_buf, 0xff, length + 1);
     m_tx_buf[0] = reg_addr;
@@ -74,7 +74,7 @@ int8_t bhi360_spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t leng
     int err_code = nrfx_spim_xfer(&m_spi, &xfer_desc, NRFX_SPIM_FLAG_NO_XFER_EVT_HANDLER);
     APP_ERROR_CHECK(err_code);
 
-    if (err_code == NRFX_SUCCESS)
+    if (err_code == 0)
     {
         while (*p_spim_event_end == 0) {};
         *p_spim_event_end = 0; 

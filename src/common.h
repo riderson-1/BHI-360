@@ -43,6 +43,7 @@
 #include <nrfx_gpiote.h>
 #include <hal/nrf_gpio.h>
 #include <zephyr/logging/log.h>
+#include <nrfx.h>
 
 #include "bhy2.h"
 
@@ -66,8 +67,8 @@ typedef struct {
 // Error check macro
 #define APP_ERROR_CHECK(err_code) \
     do { \
-        if (err_code != NRFX_SUCCESS) { \
-            LOG_ERR("Error %d at line %d", err_code, __LINE__); \
+        if ((err_code) != 0) { \
+            LOG_ERR("Error %d at line %d", (err_code), __LINE__); \
         } \
     } while (0)
 
@@ -79,7 +80,7 @@ int8_t bhi360_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t length, voi
 int8_t bhi360_spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t length, void *intf_ptr);
 
 // Global SPI instance
-extern const nrfx_spim_t m_spi;
+extern nrfx_spim_t m_spi;
 
 #ifdef __cplusplus
 }
