@@ -4,17 +4,9 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <stdio.h>
-#include <nrfx.h>
-#include <hal/nrf_gpio.h>
-#include <nrfx_spim.h>
-#include <nrfx_gpiote.h>
-#include <helpers/nrfx_reset_reason.h>
-
 #include "bhy2.h"
 #include "bhy2_parse.h"
 #include "common.h"
-#include "nrfx_spim.h"
-#include "nrfx_gpiote.h"
 #include "add_imu.h"
 
 #define BHY2_RD_WR_LEN          256 
@@ -84,14 +76,6 @@ static int8_t upload_firmware(struct bhy2_dev *dev)
     return rslt;
 }
 
-// Add error check macro
-#define APP_ERROR_CHECK(err_code) \
-    do { \
-        if (err_code != NRFX_SUCCESS) { \
-            LOG_ERR("Error %d at line %d", err_code, __LINE__); \
-        } \
-    } while (0)
-
 // Delay function for BHY2 driver
 static void bhi360_delay_us(uint32_t period_us, void *intf_ptr)
 {
@@ -106,11 +90,6 @@ static bool initialize_imu(imu_device_t *imu) {
     uint8_t hintr_ctrl, hif_ctrl, boot_status;
 
     LOG_INF("%s: Starting initialization", imu->name);
-
-    // Configure CS pin
-    nrf_gpio_cfg_output(imu->cs_pin);
-    nrf_gpio_pin_clear(imu->cs_pin);
-    k_sleep(K_USEC(1));
 
     // Initialize BHY2 device
     rslt = bhy2_init(BHY2_SPI_INTERFACE,
@@ -191,7 +170,7 @@ static bool initialize_imu(imu_device_t *imu) {
         LOG_INF("%s: Configuring quaternion sensor...", imu->name);
         rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, sample_rate, report_latency_ms, &imu->bhy2);
         print_api_error(rslt, &imu->bhy2);
-        LOG_INF("%s: Enable Quaternion at %.2fHz", imu->name, sample_rate);
+        LOG_INF("%s: Enable Quaternion at %.2fHz", imu->name, (double)sample_rate);
 
         // Configure linear acceleration sensor
         LOG_INF("%s: Configuring linear acceleration sensor...", imu->name);
@@ -234,7 +213,7 @@ static bool initialize_imu(imu_device_t *imu) {
     return false;
 }
 
-void main(void)
+int main(void)
 {
     LOG_INF("Starting BHI360 firmware upload application");
 
@@ -260,6 +239,7 @@ void main(void)
         }
         // k_msleep(10);
     }
+    return 0;
 }
 
 // Update callback functions to use IMU context

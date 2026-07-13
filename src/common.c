@@ -1,58 +1,67 @@
 #include "common.h"
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 LOG_MODULE_DECLARE(main);
 
-// Define SPI instance
-nrfx_spim_t m_spi = NRFX_SPIM_INSTANCE(3);  // Using SPIM3
-
 void setup_SPI(imu_device_t *imu)
 {
-    nrfx_spim_config_t spim_config = NRFX_SPIM_DEFAULT_CONFIG(BSP_SPI_CLK, BSP_SPI_MOSI, BSP_SPI_MISO, imu->cs_pin);
-    spim_config.ss_pin    = imu->cs_pin;
-    spim_config.miso_pin  = BSP_SPI_MISO;
-    spim_config.mosi_pin  = BSP_SPI_MOSI;
-    spim_config.sck_pin   = BSP_SPI_CLK;
+    int ret;
 
-    spim_config.bit_order = NRF_SPIM_BIT_ORDER_MSB_FIRST;
-    spim_config.frequency = NRF_SPIM_FREQ_32M;
-    spim_config.mode      = NRF_SPIM_MODE_0;
-    
-    static bool spi_initialized = false;
-    if (!spi_initialized) {
-        APP_ERROR_CHECK(nrfx_spim_init(&m_spi, &spim_config, NULL, NULL));
-        spi_initialized = true;
+    // Verify SPI device is available
+    if (!device_is_ready(imu->spi_spec.bus)) {
+        LOG_ERR("%s: SPI bus not ready", imu->name);
+        return;
     }
+
+    // Configure interrupt pin as input
+    if (imu->int_pin.port != NULL) {
+        ret = gpio_pin_configure_dt(&imu->int_pin, GPIO_INPUT);
+        if (ret < 0) {
+            LOG_ERR("%s: Failed to configure INT pin: %d", imu->name, ret);
+        } else {
+            LOG_INF("%s: INT pin configured at P%u.%02u", 
+                    imu->name,
+                    (imu->int_pin.pin >> 5) & 1,
+                    imu->int_pin.pin & 0x1F);
+        }
+    }
+
+    // Release reset (set to inactive - HIGH for GPIO_ACTIVE_LOW)
+    if (imu->reset_pin.port != NULL) {
+        ret = gpio_pin_configure_dt(&imu->reset_pin, GPIO_OUTPUT_INACTIVE);
+        if (ret < 0) {
+            LOG_ERR("%s: Failed to configure reset pin: %d", imu->name, ret);
+        } else {
+            LOG_INF("%s: Reset pin released (inactive)", imu->name);
+        }
+    }
+
+    LOG_INF("%s: SPI bus configured (8MHz)", imu->name);
 }
 
 int8_t bhi360_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t length, void *intf_ptr)
 {
     imu_device_t *imu = (imu_device_t *)intf_ptr;
-    uint8_t m_tx_buf[1];
+    int ret;
+
+    uint8_t m_tx_buf[1] = {reg_addr | 0x80};
     uint8_t m_rx_buf[length + 1];
-    size_t s_tx_buf = sizeof(m_tx_buf);
-    size_t s_rx_buf = sizeof(m_rx_buf);
 
-    volatile uint32_t * p_spim_event_end = (uint32_t *) nrfx_spim_end_event_address_get(&m_spi);
+    // Perform SPI read (read address with MSB set, then read data)
+    const struct spi_buf tx_buf = {.buf = m_tx_buf, .len = sizeof(m_tx_buf)};
+    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
 
-    memset(reg_data, 0xff, length);
-    memset(m_tx_buf, 0xff, s_tx_buf);
-    memset(m_rx_buf, 0xff, s_rx_buf);
+    struct spi_buf rx_buf = {.buf = m_rx_buf, .len = sizeof(m_rx_buf)};
+    const struct spi_buf_set rx = {.buffers = &rx_buf, .count = 1};
 
-    m_tx_buf[0] = reg_addr | 0x80;
-
-    nrfx_spim_xfer_desc_t xfer_desc = NRFX_SPIM_XFER_TRX(m_tx_buf, s_tx_buf, m_rx_buf, s_rx_buf);
-
-    int err_code = nrfx_spim_xfer(&m_spi, &xfer_desc, NRFX_SPIM_FLAG_NO_XFER_EVT_HANDLER);
-    APP_ERROR_CHECK(err_code);
-
-    if (err_code == 0)
-    {
-        while (*p_spim_event_end == 0) {};
-        *p_spim_event_end = 0; 
+    ret = spi_transceive_dt(&imu->spi_spec, &tx, &rx);
+    if (ret < 0) {
+        LOG_ERR("%s: SPI read failed: %d", imu->name, ret);
+        return -1;
     }
 
-    nrf_gpio_pin_set(imu->cs_pin);
+    // Copy data, skipping first byte (address echo)
     memcpy(reg_data, &m_rx_buf[1], length);
 
     return BHY2_INTF_RET_SUCCESS;
@@ -61,26 +70,21 @@ int8_t bhi360_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t length, voi
 int8_t bhi360_spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t length, void *intf_ptr)
 {
     imu_device_t *imu = (imu_device_t *)intf_ptr;
+    int ret;
+
     uint8_t m_tx_buf[length + 1];
-
-    volatile uint32_t * p_spim_event_end = (uint32_t *) nrfx_spim_end_event_address_get(&m_spi);
-
-    memset(m_tx_buf, 0xff, length + 1);
     m_tx_buf[0] = reg_addr;
     memcpy(m_tx_buf + 1, reg_data, length);
 
-    nrfx_spim_xfer_desc_t xfer_desc = NRFX_SPIM_XFER_TX(m_tx_buf, length + 1);
+    const struct spi_buf tx_buf = {.buf = m_tx_buf, .len = sizeof(m_tx_buf)};
+    const struct spi_buf_set tx = {.buffers = &tx_buf, .count = 1};
 
-    int err_code = nrfx_spim_xfer(&m_spi, &xfer_desc, NRFX_SPIM_FLAG_NO_XFER_EVT_HANDLER);
-    APP_ERROR_CHECK(err_code);
-
-    if (err_code == 0)
-    {
-        while (*p_spim_event_end == 0) {};
-        *p_spim_event_end = 0; 
+    ret = spi_transceive_dt(&imu->spi_spec, &tx, NULL);
+    if (ret < 0) {
+        LOG_ERR("%s: SPI write failed: %d", imu->name, ret);
+        return -1;
     }
 
-    nrf_gpio_pin_set(imu->cs_pin);
     return BHY2_INTF_RET_SUCCESS;
 }
 
@@ -115,4 +119,4 @@ const char *get_sensor_name(uint8_t sensor_id)
         case BHY2_SENSOR_ID_RV: return "Rotation Vector";
         default: return "Unknown sensor";
     }
-} 
+}
